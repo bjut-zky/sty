@@ -28,7 +28,8 @@ extern "C" {
  * @param bytes     指定大小的字节数。
  * @return void*    连续内存空间的起始地址，其大小至少可以容纳bytes个字节。此函数不会返回NULL。
  */
-void *sty_alloc(int bytes);
+STY_API void * STY_CDCEL STY_IMPORT
+sty_alloc(int bytes);
 
 /**
  * 此函数释放由sty_alloc分配得到的堆内存。若这块内存中包含了其他指针，则不保证其他指针指向指
@@ -38,7 +39,8 @@ void *sty_alloc(int bytes);
  * @see             sty_alloc
  * @param ptr       由函数sty_alloc得到的一块堆内存。
  */
-void sty_free(void *ptr);
+STY_API void STY_CDCEL STY_IMPORT 
+sty_free(void *ptr);
 
 #ifdef  __cplusplus
 }

@@ -38,9 +38,10 @@ sty_alloc(int bytes);
  * @brief           此函数释放一块堆内存，但不保证堆内存其中的内容被正确地释放。
  * @see             sty_alloc
  * @param ptr       由函数sty_alloc得到的一块堆内存。
+ * @param size      这块堆内存的大小(字节)。
  */
 STY_API void STY_CDCEL STY_IMPORT 
-sty_free(void *ptr);
+sty_free(void *ptr, int size);
 
 #ifdef  __cplusplus
 }

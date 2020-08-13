@@ -78,6 +78,9 @@ sty_mempool_freelist_addblock(struct sty_mempool *mempool, int index, union sty_
 static inline unsigned char * STY_CDCEL
 sty_mempool_freelist_popblock(struct sty_mempool *mempool, int index)
 {
+    assert(mempool != NULL);
+    assert(index >= 0 && index < FREELISTS);
+
     union sty_memblk *block = mempool->free_lists[index];
     if(block != NULL) 
         mempool->free_lists[index] = block->next;
@@ -101,7 +104,9 @@ sty_mempool_chunk_alloc_and_fill(struct sty_mempool *mempool, int size, int *nbl
     int             bytes_left  = 0;    //当前内存池中的剩余字节数。
     
     //nblocks不能指向NULL。
+    assert(mempool != NULL);
     assert(nblocks != NULL);
+    assert(size % ALIGN == 0);
     
     //初始化局部变量。
     total_size = size * (*nblocks);                         //初始状态下希望从系统中分配的字节数。这个值可能会被适当降低。

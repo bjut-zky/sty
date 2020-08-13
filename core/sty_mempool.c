@@ -4,9 +4,10 @@
 #include <assert.h>
 #include "sty_memory.h"
 
-#define ALIGN       8
-#define MAX_BYTES   128
-#define FREELISTS   (MAX_BYTES / ALIGN)
+#define ALIGN                           8
+#define MAX_BYTES                       128
+#define DEFAULT_REFILL_BLOCKS           20
+#define FREELISTS                       (MAX_BYTES / ALIGN)
 
 /**
  * @brief   此联合体用于表示自由链表中的一个内存区块，代表一块固定大小的可用内存空间。
@@ -88,6 +89,32 @@ sty_mempool_freelist_popblock(struct sty_mempool *mempool, int index)
 }
 
 /**
+ * @brief 此函数至少返回一个固定大小的内存区块，并根据实际内存使用情况填充自由链表。
+ * 
+ * @param mempool           内存池指针。
+ * @param size              内存区块大小。
+ * @return unsigned char*   大小至少为size的内存区块的首地址。
+ */
+static inline unsigned char * STY_CDCEL
+sty_mempool_refill(struct sty_mempool *mempool, int size) 
+{
+    assert(mempool != NULL);
+    assert(size % ALIGN == 0);
+
+    int             nblocks = DEFAULT_REFILL_BLOCKS; //实际分配得到的内存区块数量。
+    unsigned char   *chunk  = sty_mempool_chunk_alloc_and_fill(mempool, size, &nblocks);
+
+    //函数sty_mempool_chunk_alloc_and_fill可能会根据实际情况降低内存区块的分配数量。
+    //根据实际得到的可用内存区块数量，做不同的处理；
+    if(nblocks == 1) 
+        return chunk;   //系统的内存紧张，仅得到了一个内存块。直接返回给调用者使用吧。
+    
+    //流程走到这里，表示至少分配了两个区块。那么多余的区块可以被编入到自由链表当中待用。
+    unsigned char *result = chunk;  //第一个区块返回给用户使用。
+
+}
+
+/**
  * @brief   此函数尝试从操作系统中分配一大块内存以填充内存池，并至少返回一个可用区块。
  * @note    如果对于操作系统而言nblocks个size字节的内存区块无法满足，则会适当降低nblocks的值，但至少会返回1个区块。
  * @author  zhangkeyang
@@ -121,7 +148,7 @@ sty_mempool_chunk_alloc_and_fill(struct sty_mempool *mempool, int size, int *nbl
         mempool->pool_start += total_size;
         return result;
     }
-    else if(bytes_left < total_size >= size)
+    else if(bytes_left >= size)
     {
         //如果流程走到这里，内存池中的剩余容量不能满足本次分配需要，但是至少包含了一个内存块大小的剩余空间。
         //此时适当调整nblocks的值，并返回这块空间。之所以此时不分配内存，是为了避免浪费，毕竟随后自由链表

@@ -2,9 +2,6 @@
 #ifndef __STY__MEMORY__H__
 #define __STY__MEMORY__H__
 #include "sty_types.h"
-#ifdef  __cplusplus
-extern "C" {
-#endif
 
 #define STY_ALLOC_FAILED_RETRY      5
 #define STY_ALLOC_OOM               -1
@@ -43,7 +40,4 @@ sty_alloc(int bytes);
 STY_API void STY_CDCEL STY_IMPORT 
 sty_free(void *ptr, int size);
 
-#ifdef  __cplusplus
-}
-#endif
 #endif

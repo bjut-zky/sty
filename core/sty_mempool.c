@@ -2,12 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
 #include "sty_memory.h"
 
-#define ALIGN                           8
 #define MAX_BYTES                       128
 #define DEFAULT_REFILL_BLOCKS           20
-#define FREELISTS                       (MAX_BYTES / ALIGN)
+#define ALIGN                           8
+#define FREELISTS                       ((MAX_BYTES) / (ALIGN))
 
 /**
  * @brief   此联合体用于表示自由链表中的一个内存区块，代表一块固定大小的可用内存空间。
@@ -33,6 +34,7 @@ struct sty_mempool
     unsigned char       *pool_start;                ///< 当前内存池的起始地址。
     unsigned char       *pool_end;                  ///< 当前内存池的结束地址。
     union sty_memblk    *free_lists[FREELISTS];     ///< 当前内存池中维护的自由链表。
+    
 } sty_global_mempool;
 
 /**
@@ -85,33 +87,48 @@ sty_mempool_freelist_popblock(struct sty_mempool *mempool, int index)
     union sty_memblk *block = mempool->free_lists[index];
     if(block != NULL) 
         mempool->free_lists[index] = block->next;
-    return block;
+    return block->client_data;
 }
 
 /**
- * @brief 此函数至少返回一个固定大小的内存区块，并根据实际内存使用情况填充自由链表。
- * 
- * @param mempool           内存池指针。
- * @param size              内存区块大小。
- * @return unsigned char*   大小至少为size的内存区块的首地址。
+ * @brief 此函数用于填充内存池中的某条自由链表。
+ * @note  只有当某条自由链表中没有可用的区块时，此方法才可以被调用。
+ * @param mempool   内存池指针。
+ * @param size      内存区块的大小。
+ * @param blocks    连续内存区块(一大块连续内存)的首地址。
+ * @param nblocks   内存区块的数量。
  */
-static inline unsigned char * STY_CDCEL
-sty_mempool_refill(struct sty_mempool *mempool, int size) 
+static inline void STY_CDCEL
+sty_mempool_freelist_build(struct sty_mempool *mempool, int size, unsigned char *blocks, int nblocks)
 {
     assert(mempool != NULL);
     assert(size % ALIGN == 0);
+    assert(nblocks > 0);
 
-    int             nblocks = DEFAULT_REFILL_BLOCKS; //实际分配得到的内存区块数量。
-    unsigned char   *chunk  = sty_mempool_chunk_alloc_and_fill(mempool, size, &nblocks);
+    union sty_memblk *currentblk         = NULL;    //指向当前要链接的内存区块。
+    union sty_memblk *nextblk            = NULL;    //指向下一个要链接的自由区块。
 
-    //函数sty_mempool_chunk_alloc_and_fill可能会根据实际情况降低内存区块的分配数量。
-    //根据实际得到的可用内存区块数量，做不同的处理；
-    if(nblocks == 1) 
-        return chunk;   //系统的内存紧张，仅得到了一个内存块。直接返回给调用者使用吧。
-    
-    //流程走到这里，表示至少分配了两个区块。那么多余的区块可以被编入到自由链表当中待用。
-    unsigned char *result = chunk;  //第一个区块返回给用户使用。
+    int selected = sty_mempool_freelist_index(size);
+    nextblk = (union sty_memblk *)(blocks);         //当前要处理的区块。
+    mempool->free_lists[selected] = nextblk;        //设置当前自由链表的头结点(为第2个可用区块)。
 
+    //【构建自由链表】以下将第2个区块和第3个区块链接、第3个区块和第4个区块链接。。。直到全部链接完毕。
+    for(int i = 0; ;i++) 
+    {
+        currentblk = nextblk;
+        nextblk    = (union sty_memblk *)((unsigned char *)nextblk + size);
+        if(nblocks - 1 == i)            
+        {
+            //已经抵达了最后一个可用区块的首地址。作为单链表的结束，让其链接指针指向空，并退出循环。
+            currentblk->next = NULL;
+            break;
+        }
+        else 
+        {
+            //在这个区块后面仍然存在可用的区块，让当前区块的链接指针指向下一个区块的首地址。
+            currentblk->next = nextblk;
+        }
+    }
 }
 
 /**
@@ -214,4 +231,103 @@ sty_mempool_chunk_alloc_and_fill(struct sty_mempool *mempool, int size, int *nbl
         //此时分配了很多的内存，但是这会引发nblocks的值和返回值不对应。可以通过递归调用此函数的方式来修正这个值。
         return sty_mempool_chunk_alloc_and_fill(mempool, size, nblocks);
     }
-}   
+}
+
+/**
+ * @brief 此函数至少返回一个固定大小的内存区块，并根据实际内存使用情况填充自由链表。
+ * 
+ * @param mempool           内存池指针。
+ * @param size              内存区块大小。
+ * @return unsigned char*   大小至少为size的内存区块的首地址。
+ */
+static inline unsigned char * STY_CDCEL
+sty_mempool_refill(struct sty_mempool *mempool, int size) 
+{
+    assert(mempool != NULL);
+    assert(size % ALIGN == 0);
+
+    int             nblocks = DEFAULT_REFILL_BLOCKS; //实际分配得到的内存区块数量。
+    unsigned char   *chunk  = sty_mempool_chunk_alloc_and_fill(mempool, size, &nblocks);
+
+    //函数sty_mempool_chunk_alloc_and_fill可能会根据实际情况降低内存区块的分配数量。
+    //根据实际得到的可用内存区块数量，做不同的处理；
+    if(nblocks == 1) 
+        return chunk;   //系统的内存紧张，仅得到了一个内存块。直接返回给调用者使用吧。
+    
+    //流程走到这里，表示至少分配了两个区块。那么多余的区块可以被编入到自由链表当中待用。
+    sty_mempool_freelist_build(mempool, size, chunk + size, nblocks - 1);
+    return chunk;
+}
+
+/**
+ * C99规定的malloc函数用来分配堆内存。实际使用中，这个函数存在一些问题，比如：
+ * 1. malloc往往会额外分配一些字节来保存堆空间大小。虽然在x86_64操作系统中内存碎片不是问题，
+ *    但是当频繁地在堆中分配少额的内存时仍然可能产生较大的浪费比。
+ * 2. malloc可能会返回空指针(虽然在某些平台上不会返回空指针，但是这仍不可信)。所以调用者往往
+ *    需要针对此情况给出额外的逻辑判断。
+ * sty_alloc正是为此而设计；事实上，其内部维护了一个内存池，为减少内存浪费尽了最大努力；令一
+ * 方面，sty_alloc保证不会返回空指针。就是说，它要么返回一段足够大且可用的连续内存空间，要么
+ * 在多次尝试却失败后调用exit(STY_ALLOC_OOM)函数杀死当前进程，尝试的次数可以通过修改预定义
+ * 宏STY_ALLOC_FAILED_RETRY来调试。
+ * 
+ * @note            sty_alloc是线程安全的，但并不是可重入的。
+ * @note            sty_alloc获得的内存务必由sty_free释放。
+ * @see             sty_free
+ * @brief           此函数在堆上分配一大块连续的堆内存空间，并保证其大小足以容纳一定字节数。
+ * @author          bjut-zky
+ * @param bytes     指定大小的字节数。
+ * @return void*    连续内存空间的起始地址，其大小至少可以容纳bytes个字节。此函数不会返回NULL。
+ */
+void * STY_CDCEL STY_IMPORT
+sty_alloc(int bytes)
+{
+    assert(bytes >= 0);
+
+    if(bytes == 0)
+        bytes = 1;
+
+    void *result = NULL;
+
+    if(bytes > MAX_BYTES) 
+    {
+        result = malloc(bytes);
+        if(result == NULL)
+            exit(STY_ALLOC_OOM);
+    }
+    else 
+    {
+        int selected = sty_mempool_freelist_index(bytes);
+        result = sty_mempool_freelist_popblock(&sty_global_mempool, selected);
+        if(result == NULL)
+        {
+            int round_bytes = sty_mempool_bytes_round_up(bytes);
+            result = sty_mempool_refill(&sty_global_mempool, round_bytes);
+        }
+    }
+    return result;
+}
+
+/**
+ * 此函数释放由sty_alloc分配得到的堆内存。若这块内存中包含了其他指针，则不保证其他指针指向指
+ * 向的内存能够被正确地释放；和libc一样，这需要调用者来保证。
+ * @author          bjut-zky
+ * @brief           此函数释放一块堆内存，但不保证堆内存其中的内容被正确地释放。
+ * @see             sty_alloc
+ * @param ptr       由函数sty_alloc得到的一块堆内存。
+ * @param size      这块堆内存的大小(字节)。
+ */
+void STY_CDCEL STY_IMPORT 
+sty_free(void *ptr, int size)
+{
+    assert(size >= 0);
+
+    if(size > MAX_BYTES) 
+    {
+        free(ptr);
+    }
+    else
+    {
+        int selected = sty_mempool_freelist_index(size);
+        sty_mempool_freelist_addblock(&sty_global_mempool, selected, (union sty_memblk *) ptr);
+    }
+}

@@ -315,3 +315,14 @@ sty_alloc(int bytes)
         exit(STY_ALLOC_OOM);
     return ptr;
 }
+
+/**
+ * @brief 此函数是对free的简单封装，目的是保持API命名的一致性，方便拓展。
+ * @param bytes     分配的字节数。
+ * @return void*    分配到内存块的首地址。 
+ */
+STY_API inline void * STY_CDCEL STY_IMPORT
+sty_free(void *ptr)
+{
+    free(ptr);
+}

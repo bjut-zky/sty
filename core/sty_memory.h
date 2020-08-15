@@ -68,6 +68,14 @@ STY_API void * STY_CDCEL STY_IMPORT
 sty_mempool_alloc(struct sty_mempool *mempool, int bytes);
 
 /**
+ * @brief 此函数是对free的简单封装，目的是保持API命名的一致性，方便拓展。
+ * @param bytes     分配的字节数。
+ * @return void*    分配到内存块的首地址。 
+ */
+STY_API inline void * STY_CDCEL STY_IMPORT
+sty_free(void *ptr);
+
+/**
  * 此函数释放由sty_mempool_alloc分配得到的堆内存。若这块内存中包含了其他指针，则不保证其他指针指向指
  * 向的内存能够被正确地释放；和libc一样，这需要调用者来保证。
  * @author          bjut-zky

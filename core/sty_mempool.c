@@ -5,38 +5,6 @@
 #include <pthread.h>
 #include "sty_memory.h"
 
-#define MAX_BYTES                       128
-#define DEFAULT_REFILL_BLOCKS           20
-#define ALIGN                           8
-#define FREELISTS                       ((MAX_BYTES) / (ALIGN))
-
-/**
- * @brief   此联合体用于表示自由链表中的一个内存区块，代表一块固定大小的可用内存空间。
- * @author  zhangkeyang
- */
-union sty_memblk 
-{
-    //这两个成员中，某一时刻只有其中一个成员是合法有效的。这样做是为了节省一个指针的内存。
-    //(1) 如果此区块已经被分配给用户，则client_data是有效的，它指向实际可用的内存区块。
-    //(2) 如果此区块正在自由链表当中，则next是有效的，表示其临接内存区块。
-    unsigned char       client_data[1];   ///< 客户区可见的合法内存块起始地址, 写成数组是为了让成员成为常量。
-    union sty_memblk    *next;            ///< 自由链表可见的临接内存块起始地址。
-};
-
-/**
- * @brief   内存池结构。
- * @author  zhangkeyang
- */
-struct sty_mempool 
-{
-    int                 total_used;                 ///< 当前内存池总共分配的堆内存大小(字节)。
-    int                 available;                  ///< 当前内存池中可用的堆内存大小(字节)。
-    unsigned char       *pool_start;                ///< 当前内存池的起始地址。
-    unsigned char       *pool_end;                  ///< 当前内存池的结束地址。
-    union sty_memblk    *free_lists[FREELISTS];     ///< 当前内存池中维护的自由链表。
-    
-} sty_global_mempool;
-
 /**
  * @brief       将指定字节数调整到ALIGN的整数倍。
  * @param bytes 指定字节数。
@@ -279,7 +247,7 @@ sty_mempool_refill(struct sty_mempool *mempool, int size)
  * @return void*    连续内存空间的起始地址，其大小至少可以容纳bytes个字节。此函数不会返回NULL。
  */
 void * STY_CDCEL STY_IMPORT
-sty_alloc(int bytes)
+sty_mempool_alloc(struct sty_mempool *mempool, int bytes)
 {
     assert(bytes >= 0);
 
@@ -317,7 +285,7 @@ sty_alloc(int bytes)
  * @param size      这块堆内存的大小(字节)。
  */
 void STY_CDCEL STY_IMPORT 
-sty_free(void *ptr, int size)
+sty_mempool_free(struct sty_mempool *mempool, void *ptr, int size)
 {
     assert(size >= 0);
 
@@ -330,4 +298,20 @@ sty_free(void *ptr, int size)
         int selected = sty_mempool_freelist_index(size);
         sty_mempool_freelist_addblock(&sty_global_mempool, selected, (union sty_memblk *) ptr);
     }
+}
+
+/**
+ * @brief 此函数是对malloc的简单封装，当内存分配失败时直接结束进程。
+ * @param bytes     分配的字节数。
+ * @return void*    分配到内存块的首地址。 
+ */
+STY_API void * STY_CDCEL STY_IMPORT
+sty_alloc(int bytes)
+{
+    assert(bytes >= 0);
+
+    void *ptr = malloc(bytes);
+    if(ptr == NULL)
+        exit(STY_ALLOC_OOM);
+    return ptr;
 }
